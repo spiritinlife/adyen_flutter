@@ -21,7 +21,6 @@ public class SwiftFlutterAdyenPlugin: NSObject, FlutterPlugin {
 
     var dropInComponent: DropInComponent?
     var baseURL: String?
-    var authToken: String?
     var merchantAccount: String?
     var clientKey: String?
     var currency: String?
@@ -35,6 +34,8 @@ public class SwiftFlutterAdyenPlugin: NSObject, FlutterPlugin {
     var lineItemJson: [String: String]?
     var shopperLocale: String?
     var additionalData: [String: String]?
+    var headers: [String: String]?
+    var showStorePaymentField: Bool?
 
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -43,7 +44,9 @@ public class SwiftFlutterAdyenPlugin: NSObject, FlutterPlugin {
         let arguments = call.arguments as? [String: Any]
         let paymentMethodsResponse = arguments?["paymentMethods"] as? String
         baseURL = arguments?["baseUrl"] as? String
+        headers = arguments?["headers"] as? [String: String]
         merchantAccount = arguments?["merchantAccount"] as? String
+        showStorePaymentField = arguments?["showStorePaymentField"] as? Bool
         additionalData = arguments?["additionalData"] as? [String: String]
         clientKey = arguments?["clientKey"] as? String
         currency = arguments?["currency"] as? String
@@ -53,7 +56,7 @@ public class SwiftFlutterAdyenPlugin: NSObject, FlutterPlugin {
         reference = arguments?["reference"] as? String
         returnUrl = arguments?["returnUrl"] as? String
         shopperReference = arguments?["shopperReference"] as? String
-        shopperLocale = String((arguments?["locale"] as? String)?.split(separator: "_").last ?? "DE")
+        shopperLocale = String((arguments?["locale"] as? String)?.split(separator: "_").last ?? "GR")
         mResult = result
 
         guard let paymentData = paymentMethodsResponse?.data(using: .utf8),
@@ -74,7 +77,9 @@ public class SwiftFlutterAdyenPlugin: NSObject, FlutterPlugin {
 
         let apiContext = APIContext(environment: ctx, clientKey: clientKey!)
         let configuration = DropInComponent.Configuration(apiContext: apiContext);
+        configuration.localizationParameters = LocalizationParameters(tableName: shopperLocale!)
         configuration.card.showsHolderNameField = true
+        configuration.card.showsStorePaymentMethodField = showStorePaymentField!
         dropInComponent = DropInComponent(paymentMethods: paymentMethods, configuration: configuration, style: dropInComponentStyle)
         dropInComponent?.delegate = self
 
@@ -99,10 +104,12 @@ extension SwiftFlutterAdyenPlugin: DropInComponentDelegate {
     }
 
     public func didSubmit(_ data: PaymentComponentData, for paymentMethod: PaymentMethod, from component: DropInComponent) {
-        NSLog("I'm here")
         guard let baseURL = baseURL, let url = URL(string: baseURL + "payments") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        if (headers?["Authorization"] != nil) {
+          request.setValue(headers!["Authorization"]!, forHTTPHeaderField: "Authorization")
+        }
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let amountAsInt = Int(amount ?? "0")
@@ -176,6 +183,9 @@ extension SwiftFlutterAdyenPlugin: DropInComponentDelegate {
         guard let baseURL = baseURL, let url = URL(string: baseURL + "payments/details") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        if (headers?["Authorization"] != nil) {
+          request.setValue(headers!["Authorization"]!, forHTTPHeaderField: "Authorization")
+        }
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         let detailsRequest = DetailsRequest(paymentData: data.paymentData ?? "", details: data.details.encodable)
         do {
