@@ -79,20 +79,24 @@ class FlutterAdyenPlugin :
                 val nonNullActivity = activity!!
 
                 val additionalData = call.argument<Map<String, String>>("additionalData") ?: emptyMap()
+                val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
                 val paymentMethods = call.argument<String>("paymentMethods")
                 val baseUrl = call.argument<String>("baseUrl")
                 val clientKey = call.argument<String>("clientKey")
                 val amount = call.argument<String>("amount")
                 val currency = call.argument<String>("currency")
                 val env = call.argument<String>("environment")
+                val showStorePaymentField = call.argument<Boolean>("showStorePaymentField")
                 val lineItem = call.argument<Map<String, String>>("lineItem")
                 val shopperReference = call.argument<String>("shopperReference")
 
                 @Suppress("NULLABILITY_MISMATCH_BASED_ON_JAVA_ANNOTATIONS")
                 val lineItemString = JSONObject(lineItem).toString()
                 val additionalDataString = JSONObject(additionalData).toString()
+                val headersString = JSONObject(headers).toString()
                 val localeString = call.argument<String>("locale") ?: "de_DE"
                 val countryCode = localeString.split("_").last()
+                val languageCode = localeString.split("_").first()
 
                 /*
                 Log.e("[Flutter Adyen]", "Client Key from Flutter: $clientKey")
@@ -103,7 +107,7 @@ class FlutterAdyenPlugin :
                 Log.e("[Flutter Adyen]", "Base URL from Flutter: $baseUrl")
                 Log.e("[Flutter Adyen]", "Currency from Flutter: $currency")
                 Log.e("[Flutter Adyen]", "Shopper Reference from Flutter: $shopperReference")
-                 */
+                */
 
                 val environment = when (env) {
                     "LIVE_US" -> Environment.UNITED_STATES
@@ -117,11 +121,13 @@ class FlutterAdyenPlugin :
                 try {
                     val jsonObject = JSONObject(paymentMethods ?: "")
                     val paymentMethodsApiResponse = PaymentMethodsApiResponse.SERIALIZER.deserialize(jsonObject)
-                    val shopperLocale = Locale.GERMANY
+                    val shopperLocale = Locale.forLanguageTag(languageCode)
+                    // val shopperLocale = Locale("el", "GR")
                     // val shopperLocale = if (LocaleUtil.isValidLocale(locale)) locale else LocaleUtil.getLocale(nonNullActivity)
                     // Log.e("[Flutter Adyen] SHOPPER LOCALE", "Shopper Locale from localeString $localeString: $shopperLocale")
                     val cardConfiguration = CardConfiguration.Builder(nonNullActivity, clientKey!!)
                             .setHolderNameRequired(true)
+                            .setShowStorePaymentField(showStorePaymentField ?: false)
                             .setShopperLocale(shopperLocale)
                             .setEnvironment(environment)
                             .build()
@@ -135,12 +141,14 @@ class FlutterAdyenPlugin :
                         putString("currency", currency)
                         putString("lineItem", lineItemString)
                         putString("additionalData", additionalDataString)
+                        putString("headers", headersString)
                         putString("shopperReference", shopperReference)
                         commit()
                     }
 
                     val dropInConfiguration = DropInConfiguration.Builder(nonNullActivity, AdyenDropinService::class.java, clientKey)
                             .addCardConfiguration(cardConfiguration)
+                            .setShopperLocale(shopperLocale)
                             .setEnvironment(environment)
                             .build()
 
@@ -237,6 +245,7 @@ class AdyenDropinService : DropInService() {
         val countryCode = sharedPref.getString("countryCode", "DE")
         val lineItemString = sharedPref.getString("lineItem", "UNDEFINED_STR")
         val additionalDataString = sharedPref.getString("additionalData", "UNDEFINED_STR")
+        val headersString = sharedPref.getString("headers", null)
         val uuid: UUID = UUID.randomUUID()
         val reference: String = uuid.toString()
         val shopperReference = sharedPref.getString("shopperReference", null)
@@ -246,8 +255,8 @@ class AdyenDropinService : DropInService() {
         val lineItem: LineItem? = jsonAdapter.fromJson(lineItemString ?: "")
 
         val gson = Gson()
-
         val additionalData = gson.fromJson<Map<String, String>>(additionalDataString ?: "") ?: emptyMap()
+
         val serializedPaymentComponentData = PaymentComponentData.SERIALIZER.deserialize(paymentComponentJson)
 
         if (serializedPaymentComponentData.paymentMethod == null)
@@ -265,7 +274,9 @@ class AdyenDropinService : DropInService() {
 
         val requestBody = RequestBody.create(MediaType.parse("application/json"), paymentsRequestJson.toString())
 
-        val headers: HashMap<String, String> = HashMap()
+        val headersGson = Gson()
+        val headers: HashMap<String, String> = headersGson.fromJson<HashMap<String, String>>(headersString ?: "") ?: HashMap()
+
         val call = getService(headers, baseUrl ?: "").payments(requestBody)
         call.request().headers()
         return try {
@@ -315,7 +326,9 @@ class AdyenDropinService : DropInService() {
         val sharedPref = getSharedPreferences("ADYEN", Context.MODE_PRIVATE)
         val baseUrl = sharedPref.getString("baseUrl", "UNDEFINED_STR")
         val requestBody = RequestBody.create(MediaType.parse("application/json"), actionComponentJson.toString())
-        val headers: HashMap<String, String> = HashMap()
+        val headersString = sharedPref.getString("headers", null)
+        val headersGson = Gson()
+        val headers: HashMap<String, String> = headersGson.fromJson<HashMap<String, String>>(headersString ?: "") ?: HashMap()
 
         val call = getService(headers, baseUrl ?: "").details(requestBody)
         return try {
