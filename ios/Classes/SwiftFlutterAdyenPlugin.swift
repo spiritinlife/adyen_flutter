@@ -107,8 +107,8 @@ extension SwiftFlutterAdyenPlugin: DropInComponentDelegate {
         guard let baseURL = baseURL, let url = URL(string: baseURL + "payments") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        if (headers?["Authorization"] != nil) {
-          request.setValue(headers!["Authorization"]!, forHTTPHeaderField: "Authorization")
+        for (key, value) in headers! {
+          request.setValue(value, forHTTPHeaderField: key)
         }
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -183,8 +183,8 @@ extension SwiftFlutterAdyenPlugin: DropInComponentDelegate {
         guard let baseURL = baseURL, let url = URL(string: baseURL + "payments/details") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        if (headers?["Authorization"] != nil) {
-          request.setValue(headers!["Authorization"]!, forHTTPHeaderField: "Authorization")
+        for (key, value) in headers! {
+          request.setValue(value, forHTTPHeaderField: key)
         }
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         let detailsRequest = DetailsRequest(paymentData: data.paymentData ?? "", details: data.details.encodable)
