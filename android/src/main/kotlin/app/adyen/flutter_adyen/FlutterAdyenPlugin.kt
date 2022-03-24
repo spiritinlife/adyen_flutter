@@ -14,6 +14,7 @@ import com.adyen.checkout.dropin.DropInConfiguration
 import com.adyen.checkout.dropin.service.DropInService
 import com.adyen.checkout.dropin.service.DropInServiceResult
 import com.adyen.checkout.redirect.RedirectComponent
+import com.adyen.checkout.googlepay.GooglePayConfiguration
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import com.squareup.moshi.Moshi
@@ -94,7 +95,7 @@ class FlutterAdyenPlugin :
                 val lineItemString = JSONObject(lineItem).toString()
                 val additionalDataString = JSONObject(additionalData).toString()
                 val headersString = JSONObject(headers).toString()
-                val localeString = call.argument<String>("locale") ?: "de_DE"
+                val localeString = call.argument<String>("locale") ?: "el_GR"
                 val countryCode = localeString.split("_").last()
                 val languageCode = localeString.split("_").first()
 
@@ -146,13 +147,31 @@ class FlutterAdyenPlugin :
                         commit()
                     }
 
-                    val dropInConfiguration = DropInConfiguration.Builder(nonNullActivity, AdyenDropinService::class.java, clientKey)
-                            .addCardConfiguration(cardConfiguration)
-                            .setShopperLocale(shopperLocale)
+                    val amountToPay = Amount()
+                    amountToPay.currency = currency
+                    amountToPay.value = amount!!.toInt()
+
+                    val googlePayConfig = GooglePayConfiguration.Builder(nonNullActivity, clientKey)
+                            .setAmount(amountToPay)
                             .setEnvironment(environment)
                             .build()
 
-                    DropIn.startPayment(nonNullActivity, paymentMethodsApiResponse, dropInConfiguration)
+                    val dropInConfigurationBeforeBuild = DropInConfiguration.Builder(nonNullActivity, AdyenDropinService::class.java, clientKey)
+                            .addCardConfiguration(cardConfiguration)
+                            .setShopperLocale(shopperLocale)
+                            .setEnvironment(environment)
+                            .addGooglePayConfiguration(googlePayConfig)
+                    
+                    if (amountToPay.value > 0) {
+                      var dropInConfiguration = dropInConfigurationBeforeBuild
+                            .setAmount(amountToPay)
+                            .build()
+                      DropIn.startPayment(nonNullActivity, paymentMethodsApiResponse, dropInConfiguration)
+                    } else {
+                      var dropInConfiguration = dropInConfigurationBeforeBuild
+                            .build()
+                      DropIn.startPayment(nonNullActivity, paymentMethodsApiResponse, dropInConfiguration)
+                    }
 
                     flutterResult = res
                 } catch (e: Throwable) {
@@ -232,8 +251,8 @@ class FlutterAdyenPlugin :
  * This is just an example on how to make network calls on the [DropInService].
  * You should make the calls to your own servers and have additional data or processing if necessary.
  */
-@Throws(JsonSyntaxException::class)
-inline fun <reified T> Gson.fromJson(json: String): T? = fromJson<T>(json, object: TypeToken<T>() {}.type)
+// @Throws(JsonSyntaxException::class)
+// inline fun <reified T> Gson.fromJson(json: String): T? = fromJson<T>(json, object: TypeToken<T>() {}.type)
 
 class AdyenDropinService : DropInService() {
 
@@ -242,7 +261,7 @@ class AdyenDropinService : DropInService() {
         val baseUrl = sharedPref.getString("baseUrl", "UNDEFINED_STR")
         val amount = sharedPref.getString("amount", "UNDEFINED_STR")
         val currency = sharedPref.getString("currency", "UNDEFINED_STR")
-        val countryCode = sharedPref.getString("countryCode", "DE")
+        val countryCode = sharedPref.getString("countryCode", "GR")
         val lineItemString = sharedPref.getString("lineItem", "UNDEFINED_STR")
         val additionalDataString = sharedPref.getString("additionalData", "UNDEFINED_STR")
         val headersString = sharedPref.getString("headers", null)
@@ -255,7 +274,7 @@ class AdyenDropinService : DropInService() {
         val lineItem: LineItem? = jsonAdapter.fromJson(lineItemString ?: "")
 
         val gson = Gson()
-        val additionalData = gson.fromJson<Map<String, String>>(additionalDataString ?: "") ?: emptyMap()
+        val additionalData = gson.fromJson<Map<String, String>>(additionalDataString ?: "", object: TypeToken<HashMap<String, String>>() {}.type) ?: emptyMap()
 
         val serializedPaymentComponentData = PaymentComponentData.SERIALIZER.deserialize(paymentComponentJson)
 
@@ -268,14 +287,14 @@ class AdyenDropinService : DropInService() {
                 currency = currency ?: "",
                 reference = reference,
                 shopperReference = shopperReference,
-                countryCode = countryCode ?: "DE",
+                countryCode = countryCode ?: "GR",
                 additionalData = additionalData)
         val paymentsRequestJson = serializePaymentsRequest(paymentsRequest)
 
         val requestBody = RequestBody.create(MediaType.parse("application/json"), paymentsRequestJson.toString())
 
         val headersGson = Gson()
-        val headers: HashMap<String, String> = headersGson.fromJson<HashMap<String, String>>(headersString ?: "") ?: HashMap()
+        val headers: HashMap<String, String> = headersGson.fromJson<HashMap<String, String>>(headersString ?: "", object: TypeToken<HashMap<String, String>>() {}.type) ?: HashMap()
 
         val call = getService(headers, baseUrl ?: "").payments(requestBody)
         call.request().headers()
@@ -291,19 +310,23 @@ class AdyenDropinService : DropInService() {
                     }
                     DropInServiceResult.Action(paymentsResponse.action)
                 } else {
-                    if (paymentsResponse.resultCode != null &&
-                            (paymentsResponse.resultCode == "Authorised" || paymentsResponse.resultCode == "Received" || paymentsResponse.resultCode == "Pending")) {
-                        with(sharedPref.edit()) {
+                    if (paymentsResponse.resultCode != null) {
+                      with(sharedPref.edit()) {
                             putString("AdyenResultCode", paymentsResponse.resultCode)
                             commit()
-                        }
+                      }
+
+                      if (paymentsResponse.resultCode == "Authorised") {
                        DropInServiceResult.Finished(paymentsResponse.resultCode)
+                      } else {
+                        DropInServiceResult.Error(paymentsResponse.localizedErrorMessage ?: paymentsResponse.resultCode);
+                      }
                     } else {
                         with(sharedPref.edit()) {
-                            putString("AdyenResultCode", paymentsResponse.resultCode ?: "EMPTY")
+                            putString("AdyenResultCode", paymentsResponse.resultCode ?: "Something went wrong, please try again")
                             commit()
                         }
-                       DropInServiceResult.Finished(paymentsResponse.resultCode ?: "EMPTY")
+                       DropInServiceResult.Finished(paymentsResponse.resultCode ?: "Something went wrong, please try again")
                     }
                 }
             } else {
@@ -311,7 +334,7 @@ class AdyenDropinService : DropInService() {
                     putString("AdyenResultCode", "ERROR")
                     commit()
                 }
-                DropInServiceResult.Error(errorMessage = "IOException")
+                DropInServiceResult.Error(errorMessage = "Something went wrong, please try again")
             }
         } catch (e: IOException) {
             with(sharedPref.edit()) {
@@ -328,7 +351,7 @@ class AdyenDropinService : DropInService() {
         val requestBody = RequestBody.create(MediaType.parse("application/json"), actionComponentJson.toString())
         val headersString = sharedPref.getString("headers", null)
         val headersGson = Gson()
-        val headers: HashMap<String, String> = headersGson.fromJson<HashMap<String, String>>(headersString ?: "") ?: HashMap()
+        val headers: HashMap<String, String> = headersGson.fromJson<HashMap<String, String>>(headersString ?: "", object: TypeToken<HashMap<String, String>>() {}.type) ?: HashMap()
 
         val call = getService(headers, baseUrl ?: "").details(requestBody)
         return try {
@@ -341,34 +364,39 @@ class AdyenDropinService : DropInService() {
                         commit()
                     }
                     DropInServiceResult.Action(detailsResponse.action)
-                }
-                else if (detailsResponse.resultCode != null &&
-                        (detailsResponse.resultCode == "Authorised" || detailsResponse.resultCode == "Received" || detailsResponse.resultCode == "Pending")) {
-                    with(sharedPref.edit()) {
-                        putString("AdyenResultCode", detailsResponse.resultCode)
-                        commit()
-                    }
-                    DropInServiceResult.Finished(detailsResponse.resultCode)
                 } else {
-                    with(sharedPref.edit()) {
-                        putString("AdyenResultCode", detailsResponse.resultCode ?: "EMPTY")
-                        commit()
+                    if (detailsResponse.resultCode != null) {
+                      with(sharedPref.edit()) {
+                            putString("AdyenResultCode", detailsResponse.resultCode)
+                            commit()
+                      }
+
+                      if (detailsResponse.resultCode == "Authorised") {
+                       DropInServiceResult.Finished(detailsResponse.resultCode)
+                      } else {
+                        DropInServiceResult.Error(detailsResponse.localizedErrorMessage ?: detailsResponse.resultCode);
+                      }
+                    } else {
+                        with(sharedPref.edit()) {
+                            putString("AdyenResultCode", detailsResponse.resultCode ?: "Something went wrong, please try again")
+                            commit()
+                        }
+                       DropInServiceResult.Finished(detailsResponse.resultCode ?: "Something went wrong, please try again")
                     }
-                    DropInServiceResult.Finished(detailsResponse.resultCode ?: "EMPTY")
                 }
             } else {
                 with(sharedPref.edit()) {
                     putString("AdyenResultCode", "ERROR")
                     commit()
                 }
-                DropInServiceResult.Error(errorMessage = "IOException")
+                DropInServiceResult.Error(errorMessage = "Something went wrong, please try again")
             }
         } catch (e: IOException) {
             with(sharedPref.edit()) {
                 putString("AdyenResultCode", "ERROR")
                 commit()
             }
-            DropInServiceResult.Error(errorMessage =  "IOException")
+            DropInServiceResult.Error(errorMessage =  "Something went wrong, please try again")
         }
     }
 }
@@ -405,7 +433,7 @@ fun createAmount(value: Int, currency: String): Amount {
 //region data classes
 data class Payment(
         val paymentMethod: PaymentMethodDetails,
-        val countryCode: String = "DE",
+        val countryCode: String = "GR",
         val storePaymentMethod: Boolean,
         val amount: Amount,
         val reference: String,

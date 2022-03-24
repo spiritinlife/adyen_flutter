@@ -4,10 +4,16 @@ import Adyen
 import Adyen3DS2
 import Foundation
 import AdyenNetworking
+import PassKit
 
-struct PaymentError: Error {
+ struct PaymentError: Error {
+     public var errorDescription: String?
 
-}
+     public init(errorDescription: String? = nil) {
+         self.errorDescription = errorDescription
+     }
+ }
+
 struct PaymentCancelled: Error {
 
 }
@@ -22,6 +28,7 @@ public class SwiftFlutterAdyenPlugin: NSObject, FlutterPlugin {
     var dropInComponent: DropInComponent?
     var baseURL: String?
     var merchantAccount: String?
+    var merchantIdentifier: String?
     var clientKey: String?
     var currency: String?
     var amount: String?
@@ -37,7 +44,6 @@ public class SwiftFlutterAdyenPlugin: NSObject, FlutterPlugin {
     var headers: [String: String]?
     var showStorePaymentField: Bool?
 
-
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         guard call.method.elementsEqual("openDropIn") else { return }
 
@@ -46,6 +52,7 @@ public class SwiftFlutterAdyenPlugin: NSObject, FlutterPlugin {
         baseURL = arguments?["baseUrl"] as? String
         headers = arguments?["headers"] as? [String: String]
         merchantAccount = arguments?["merchantAccount"] as? String
+        merchantIdentifier = arguments?["merchantIdentifier"] as? String
         showStorePaymentField = arguments?["showStorePaymentField"] as? Bool
         additionalData = arguments?["additionalData"] as? [String: String]
         clientKey = arguments?["clientKey"] as? String
@@ -75,11 +82,25 @@ public class SwiftFlutterAdyenPlugin: NSObject, FlutterPlugin {
 
         let dropInComponentStyle = DropInComponent.Style()
 
+        let formatter = NumberFormatter()
+        formatter.generatesDecimalNumbers = true
+        let amountAsDecimal = formatter.number(from: amount ?? "0") as? NSDecimalNumber ?? 0
+        let summaryItems = [PKPaymentSummaryItem(label: lineItemJson?["description"] ?? "Vendora payment", amount: amountAsDecimal.dividing(by: 100), type: .final)]
+        
+        let applePayConfiguration = ApplePayComponent.Configuration(summaryItems: summaryItems, merchantIdentifier: merchantIdentifier ?? "")
+        let amountAsInt = Int(amount ?? "0")
+
         let apiContext = APIContext(environment: ctx, clientKey: clientKey!)
         let configuration = DropInComponent.Configuration(apiContext: apiContext);
         configuration.localizationParameters = LocalizationParameters(tableName: shopperLocale!)
         configuration.card.showsHolderNameField = true
         configuration.card.showsStorePaymentMethodField = showStorePaymentField!
+        if (merchantIdentifier != nil && !merchantIdentifier!.isEmpty) {
+            configuration.applePay = applePayConfiguration
+        }
+        if (amountAsInt! > 0) {
+            configuration.payment = Adyen.Payment(amount: Adyen.Amount(value: amountAsInt!, currencyCode: "EUR"), countryCode: shopperLocale!)
+        }
         dropInComponent = DropInComponent(paymentMethods: paymentMethods, configuration: configuration, style: dropInComponentStyle)
         dropInComponent?.delegate = self
 
@@ -165,12 +186,12 @@ extension SwiftFlutterAdyenPlugin: DropInComponentDelegate {
                 component.handle(action)
             } else {
                 component.stopLoadingIfNeeded()
-                if response.resultCode == .authorised || response.resultCode == .received || response.resultCode == .pending, let result = self.mResult {
+                if response.resultCode == .authorised, let result = self.mResult {
                     result(response.resultCode.rawValue)
                     self.topController?.dismiss(animated: false, completion: nil)
 
-                } else if (response.resultCode == .error || response.resultCode == .refused) {
-                    self.didFail(with: PaymentError(), from: component)
+                } else if (response.resultCode == .error || response.resultCode == .refused || response.resultCode == .received || response.resultCode == .pending) {
+                    self.didFail(with: PaymentError(errorDescription: response.localizedErrorMessage), from: component)
                 }
                 else {
                     self.didFail(with: PaymentCancelled(), from: component)
@@ -213,11 +234,28 @@ extension SwiftFlutterAdyenPlugin: DropInComponentDelegate {
                 self.mResult?("PAYMENT_CANCELLED")
             } else if let componentError = error as? ComponentError, componentError == ComponentError.cancelled {
                 self.mResult?("PAYMENT_CANCELLED")
-            }else {
+            } else {
+                if (error is PaymentError) {
+                    self.showAlertError(with: error as! PaymentError)
+                }
                 self.mResult?("PAYMENT_ERROR")
             }
             self.topController?.dismiss(animated: true, completion: nil)
         }
+    }
+    
+    private func showAlertError(with error: PaymentError) {
+        // Create new Alert
+        let dialogMessage = UIAlertController(title: "", message: error.errorDescription ?? "Something went wrong", preferredStyle: .alert)
+        
+        // Create OK button
+        let ok = UIAlertAction(title: "OK", style: .default)
+        
+        //Add OK button to a dialog message
+        dialogMessage.addAction(ok)
+        // Present Alert to
+        self.topController?.dismiss(animated: false)
+        self.topController?.present(dialogMessage, animated: true, completion: nil)
     }
 }
 
@@ -272,16 +310,20 @@ internal struct PaymentsResponse: Response {
     internal let resultCode: ResultCode
 
     internal let action: Action?
+    
+    internal let localizedErrorMessage: String?
 
     internal init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.resultCode = try container.decode(ResultCode.self, forKey: .resultCode)
         self.action = try container.decodeIfPresent(Action.self, forKey: .action)
+        self.localizedErrorMessage = try container.decodeIfPresent(String.self, forKey: .localizedErrorMessage)
     }
 
     private enum CodingKeys: String, CodingKey {
         case resultCode
         case action
+        case localizedErrorMessage
     }
 
 }
