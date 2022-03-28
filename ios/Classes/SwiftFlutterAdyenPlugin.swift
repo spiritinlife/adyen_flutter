@@ -246,7 +246,7 @@ extension SwiftFlutterAdyenPlugin: DropInComponentDelegate {
     
     private func showAlertError(with error: PaymentError) {
         // Create new Alert
-        let dialogMessage = UIAlertController(title: "", message: error.errorDescription ?? "Something went wrong", preferredStyle: .alert)
+        let dialogMessage = UIAlertController(title: "", message: error.errorDescription ?? "Something went wrong. Please try again and if the problem persists, contact customer support.", preferredStyle: .alert)
         
         // Create OK button
         let ok = UIAlertAction(title: "OK", style: .default)

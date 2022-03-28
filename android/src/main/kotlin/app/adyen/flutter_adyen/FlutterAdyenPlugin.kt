@@ -341,7 +341,7 @@ class AdyenDropinService : DropInService() {
                 putString("AdyenResultCode", "ERROR")
                 commit()
             }
-            DropInServiceResult.Error(errorMessage = "IOException")
+            DropInServiceResult.Error(errorMessage = "Something went wrong. Please try again and if the problem persists, contact customer support.")
         }
     }
 
